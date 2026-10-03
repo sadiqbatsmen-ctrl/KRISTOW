@@ -25,6 +25,7 @@ input{flex:1;min-width:0;padding:12px;border-radius:10px;border:0;background:var
 form button{border:0;border-radius:10px;padding:0 14px;font-size:16px;background:var(--me);color:#fff}
 #mic.on{background:#dc2626}
 .act{display:block;margin-top:8px;padding:10px;border-radius:10px;background:#16a34a;color:#fff;text-decoration:none;text-align:center}
+.m img{max-width:100%;border-radius:10px;display:block;margin-top:8px}
 #cp{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:16px;z-index:5}
 #cp[hidden]{display:none}
 #cp .box{background:var(--card);border-radius:14px;padding:14px;width:100%;max-width:420px;max-height:85%;overflow:auto;display:flex;flex-direction:column;gap:8px}
@@ -89,6 +90,19 @@ async function callModel(mdl){
   let j={};try{j=await r.json()}catch(e){}
   return {ok:r.ok,status:r.status,j:j,msg:(j.error&&j.error.message)||'Error '+r.status};
 }
+const IMG_MODEL='gemini-3.1-flash-image';
+async function makeImage(prompt){
+  const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+IMG_MODEL+':generateContent?key='+encodeURIComponent(key()),{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({contents:[{role:'user',parts:[{text:prompt}]}],generationConfig:{responseModalities:['TEXT','IMAGE']}})
+  });
+  const j=await r.json();
+  if(!r.ok)throw new Error((j.error&&j.error.message)||'Error '+r.status);
+  const ps=(j.candidates&&j.candidates[0]&&j.candidates[0].content&&j.candidates[0].content.parts)||[];
+  const p=ps.find(x=>x.inlineData);
+  if(!p)throw new Error('Photo nahi bani, dusra prompt try karo.');
+  return 'data:'+p.inlineData.mimeType+';base64,'+p.inlineData.data;
+}
 async function generate(){
   let res=await callModel(model());
   if(res.ok)return res.j;
@@ -120,11 +134,13 @@ function digits(num){
 }
 function sysText(){
   const n=loadC().slice(0,100).map(c=>c.name).join(', ');
-  return SYS+' The user has saved contacts: '+(n||'none')+'. If the user asks to call someone or to send a WhatsApp message, use the matching tool (use the exact contact name from the list) instead of only replying. You cannot call or send by yourself: the app shows a button and the user taps it, so never say the call or message is already done.';
+  return SYS+' The user has saved contacts: '+(n||'none')+'. If the user asks to call someone or to send a WhatsApp message, use the matching tool (use the exact contact name from the list) instead of only replying. You cannot call or send by yourself: the app shows a button and the user taps it, so never say the call or message is already done. If the user asks to create, draw or generate a photo or image, use the create_image tool.';
 }
 const TOOLS=[{function_declarations:[
   {name:'call_contact',description:'Call a saved contact on the phone',parameters:{type:'object',properties:{name:{type:'string',description:'Contact name'}},required:['name']}},
   {name:'whatsapp_contact',description:'Send a WhatsApp message to a saved contact',parameters:{type:'object',properties:{name:{type:'string',description:'Contact name'},message:{type:'string',description:'Message text, in the language the user speaks'}},required:['name','message']}}
+,
+  {name:'create_image',description:'Generate an image or photo from a text description',parameters:{type:'object',properties:{prompt:{type:'string',description:'Detailed image description in English'}},required:['prompt']}}
 ]}];
 function mkAction(c){
   const a=c.args||{};const f=findC(a.name);
@@ -191,6 +207,19 @@ async function ask(q){
   try{
     const j=await generate();
     const parts=(j.candidates&&j.candidates[0]&&j.candidates[0].content&&j.candidates[0].content.parts)||[];
+    const ic=parts.find(p=>p.functionCall&&p.functionCall.name==='create_image');
+    if(ic){
+      wait.textContent='Photo bana raha hoon...';
+      const src=await makeImage((ic.functionCall.args||{}).prompt||q);
+      wait.textContent='Ye lo teri photo.';
+      const im=document.createElement('img');im.src=src;
+      const dl=document.createElement('a');dl.className='act';dl.href=src;dl.download='jarvis.png';dl.textContent='⬇ Download';
+      wait.append(im,dl);
+      hist.push({role:'model',parts:[{text:'Photo bana di.'}]});
+      speak('Ye lo teri photo.');
+      log.scrollTop=log.scrollHeight;
+      return;
+    }
     const acts=parts.filter(p=>p.functionCall).map(p=>mkAction(p.functionCall));
     let a=parts.map(p=>p.text||'').join('').trim();
     if(!a&&acts.length)a=acts.map(x=>x.say).join('\n');
