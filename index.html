@@ -37,7 +37,7 @@ form button{border:0;border-radius:10px;padding:0 14px;font-size:16px;background
 </head>
 <body>
 <header>
-  <h1>Jarvis <small style="font-weight:400;opacity:.6">v9</small></h1>
+  <h1>Jarvis <small style="font-weight:400;opacity:.6">v10</small></h1>
   <button id="vt">Voice: ON</button>
   <button id="cb">👥</button>
   <button id="kb">Key</button>
@@ -199,19 +199,29 @@ function speak(t){
   const u=new SpeechSynthesisUtterance(t);u.lang='hi-IN';speechSynthesis.speak(u);
 }
 
-async function showImage(wait,prompt){
+function pkey(){try{return localStorage.getItem('pk')||''}catch(e){return ''}}
+async function showImage(wait,pr){
+  const prompt0=pr;
   wait.textContent='Photo bana raha hoon...';
   let src,free=false;
-  try{src=await makeImage(prompt)}
+  try{src=await makeImage(pr)}
   catch(e){
     if(!/quota|billing|429|limit|not found|404/i.test(e.message))throw e;
-    const clean=prompt.replace(IMG_RE,' ').replace(MAKE_RE,' ').replace(/\s+/g,' ').trim()||prompt;
-    src='https://image.pollinations.ai/prompt/'+encodeURIComponent(clean)+'?width=768&height=768&nologo=true&seed='+Date.now();
+    const clean=pr.replace(IMG_RE,' ').replace(MAKE_RE,' ').replace(/\s+/g,' ').trim()||pr;
+    const pk=pkey();
+    src=pk?'https://gen.pollinations.ai/image/'+encodeURIComponent(clean)+'?width=768&height=768&seed='+Date.now()+'&key='+encodeURIComponent(pk)
+      :'https://image.pollinations.ai/prompt/'+encodeURIComponent(clean)+'?width=768&height=768&nologo=true&seed='+Date.now();
     free=true;
   }
   wait.textContent=free?'Ye lo teri photo (free service se).':'Ye lo teri photo.';
   const im=document.createElement('img');im.src=src;
-  if(free)im.onerror=()=>{wait.textContent='Free service se bhi photo nahi bani. Thodi der baad try karo.'};
+  if(free)im.onerror=()=>{
+    if(!pkey()){
+      const k=window.prompt('Free service ko key chahiye. enter.pollinations.ai par free signup karke key paste karo:');
+      if(k&&k.trim()){try{localStorage.setItem('pk',k.trim())}catch(e){}showImage(wait,prompt0);return}
+    }
+    wait.textContent='Free service se bhi photo nahi bani (limit ho sakti hai). 20-30 second baad dobara try karo.';
+  };
   const dl=document.createElement('a');dl.className='act';dl.href=src;dl.download='jarvis.png';dl.textContent='⬇ Download';
   wait.append(im,dl);
   hist.push({role:'model',parts:[{text:'Photo bana di.'}]});
