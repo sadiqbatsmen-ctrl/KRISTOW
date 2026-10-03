@@ -197,6 +197,8 @@ async function ask(q){
     if(!a)a='Jawab nahi mila.';
     wait.textContent=a;
     acts.forEach(x=>{if(x.el)wait.appendChild(x.el)});
+    const auto=acts.filter(x=>x.el);
+    if(auto.length===1){setTimeout(()=>{location.href=auto[0].el.href},1200)}
     hist.push({role:'model',parts:[{text:a}]});
     speak(a);
   }catch(e){
