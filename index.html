@@ -199,27 +199,38 @@ function speak(t){
   const u=new SpeechSynthesisUtterance(t);u.lang='hi-IN';speechSynthesis.speak(u);
 }
 
+async function showImage(wait,prompt){
+  wait.textContent='Photo bana raha hoon...';
+  let src,free=false;
+  try{src=await makeImage(prompt)}
+  catch(e){
+    if(!/quota|billing|429|limit|not found|404/i.test(e.message))throw e;
+    const clean=prompt.replace(IMG_RE,' ').replace(MAKE_RE,' ').replace(/\s+/g,' ').trim()||prompt;
+    src='https://image.pollinations.ai/prompt/'+encodeURIComponent(clean)+'?width=768&height=768&nologo=true&seed='+Date.now();
+    free=true;
+  }
+  wait.textContent=free?'Ye lo teri photo (free service se).':'Ye lo teri photo.';
+  const im=document.createElement('img');im.src=src;
+  if(free)im.onerror=()=>{wait.textContent='Free service se bhi photo nahi bani. Thodi der baad try karo.'};
+  const dl=document.createElement('a');dl.className='act';dl.href=src;dl.download='jarvis.png';dl.textContent='⬇ Download';
+  wait.append(im,dl);
+  hist.push({role:'model',parts:[{text:'Photo bana di.'}]});
+  speak('Ye lo teri photo.');
+  log.scrollTop=log.scrollHeight;
+}
+const IMG_RE=/(photo|image|picture|pic\b|tasveer|tasvir|tasweer|फोटो|तस्वीर|चित्र|फ़ोटो)/i;
+const MAKE_RE=/(bana|banao|banaao|bnao|create|generate|draw|make|बना|बनाओ|बनाइए)/i;
 async function ask(q){
   if(!key()){setKey();if(!key()){add('Pehle API key daalo (upar Key button).','b');return}}
   add(q,'u');
   hist.push({role:'user',parts:[{text:q}]});
   const wait=add('Soch raha hoon...','b');
   try{
+    if(IMG_RE.test(q)&&MAKE_RE.test(q)){await showImage(wait,q);return}
     const j=await generate();
     const parts=(j.candidates&&j.candidates[0]&&j.candidates[0].content&&j.candidates[0].content.parts)||[];
     const ic=parts.find(p=>p.functionCall&&p.functionCall.name==='create_image');
-    if(ic){
-      wait.textContent='Photo bana raha hoon...';
-      const src=await makeImage((ic.functionCall.args||{}).prompt||q);
-      wait.textContent='Ye lo teri photo.';
-      const im=document.createElement('img');im.src=src;
-      const dl=document.createElement('a');dl.className='act';dl.href=src;dl.download='jarvis.png';dl.textContent='⬇ Download';
-      wait.append(im,dl);
-      hist.push({role:'model',parts:[{text:'Photo bana di.'}]});
-      speak('Ye lo teri photo.');
-      log.scrollTop=log.scrollHeight;
-      return;
-    }
+    if(ic){await showImage(wait,(ic.functionCall.args||{}).prompt||q);return}
     const acts=parts.filter(p=>p.functionCall).map(p=>mkAction(p.functionCall));
     let a=parts.map(p=>p.text||'').join('').trim();
     if(!a&&acts.length)a=acts.map(x=>x.say).join('\n');
