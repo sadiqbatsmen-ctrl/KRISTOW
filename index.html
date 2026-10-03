@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Jarvis</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f1720">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
 <style>
 :root{--bg:#0f1720;--card:#1c2733;--me:#2563eb;--tx:#e8eef5}
 *{box-sizing:border-box}
@@ -20,12 +24,21 @@ form{display:flex;gap:6px;padding:10px;background:var(--card)}
 input{flex:1;min-width:0;padding:12px;border-radius:10px;border:0;background:var(--bg);color:var(--tx);font-size:16px}
 form button{border:0;border-radius:10px;padding:0 14px;font-size:16px;background:var(--me);color:#fff}
 #mic.on{background:#dc2626}
+.act{display:block;margin-top:8px;padding:10px;border-radius:10px;background:#16a34a;color:#fff;text-decoration:none;text-align:center}
+#cp{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:16px;z-index:5}
+#cp[hidden]{display:none}
+#cp .box{background:var(--card);border-radius:14px;padding:14px;width:100%;max-width:420px;max-height:85%;overflow:auto;display:flex;flex-direction:column;gap:8px}
+#cp button{background:var(--me);color:#fff;border:0;border-radius:8px;padding:10px}
+#cp .top{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.cr{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid #334}
+#cp .cr button{background:none;padding:4px 8px}
 </style>
 </head>
 <body>
 <header>
-  <h1>Jarvis <small style="font-weight:400;opacity:.6">v3</small></h1>
+  <h1>Jarvis <small style="font-weight:400;opacity:.6">v5</small></h1>
   <button id="vt">Voice: ON</button>
+  <button id="cb">👥</button>
   <button id="kb">Key</button>
 </header>
 <div id="log"></div>
@@ -34,6 +47,16 @@ form button{border:0;border-radius:10px;padding:0 14px;font-size:16px;background
   <button type="button" id="mic">🎤</button>
   <button type="submit">Send</button>
 </form>
+<div id="cp" hidden>
+  <div class="box">
+    <div class="top"><b>Contacts (sirf is phone me save)</b><button id="cx">X</button></div>
+    <div id="cl"></div>
+    <button id="ci">Phone se contacts lo</button>
+    <input id="cn" placeholder="Naam">
+    <input id="cnum" placeholder="Number" inputmode="tel">
+    <button id="ca">Jodo</button>
+  </div>
+</div>
 <script>
 const $=id=>document.getElementById(id);
 const log=$('log'), inp=$('in');
@@ -61,7 +84,7 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 async function callModel(mdl){
   const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+mdl+':generateContent?key='+encodeURIComponent(key()),{
     method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({system_instruction:{parts:[{text:SYS}]},contents:hist.slice(-20)})
+    body:JSON.stringify({system_instruction:{parts:[{text:sysText()}]},tools:TOOLS,contents:hist.slice(-20)})
   });
   let j={};try{j=await r.json()}catch(e){}
   return {ok:r.ok,status:r.status,j:j,msg:(j.error&&j.error.message)||'Error '+r.status};
@@ -83,6 +106,73 @@ async function generate(){
   }
   throw new Error(res.msg+' [tried: '+tried.join(', ')+']');
 }
+function loadC(){try{return JSON.parse(localStorage.getItem('ct')||'[]')}catch(e){return []}}
+function saveC(c){try{localStorage.setItem('ct',JSON.stringify(c))}catch(e){}}
+const norm=s=>(s||'').toLowerCase().trim();
+function findC(n){n=norm(n);if(!n)return null;const c=loadC();return c.find(x=>norm(x.name)===n)||c.find(x=>norm(x.name).includes(n)||n.includes(norm(x.name)))||null}
+function digits(num){
+  const plus=/^\s*\+/.test(num||'');let d=(num||'').replace(/\D/g,'');
+  if(plus)return d;
+  if(d.startsWith('00'))return d.slice(2);
+  if(d.length===10)return '91'+d;
+  if(d.length===11&&d.startsWith('0'))return '91'+d.slice(1);
+  return d;
+}
+function sysText(){
+  const n=loadC().slice(0,100).map(c=>c.name).join(', ');
+  return SYS+' The user has saved contacts: '+(n||'none')+'. If the user asks to call someone or to send a WhatsApp message, use the matching tool (use the exact contact name from the list) instead of only replying. You cannot call or send by yourself: the app shows a button and the user taps it, so never say the call or message is already done.';
+}
+const TOOLS=[{function_declarations:[
+  {name:'call_contact',description:'Call a saved contact on the phone',parameters:{type:'object',properties:{name:{type:'string',description:'Contact name'}},required:['name']}},
+  {name:'whatsapp_contact',description:'Send a WhatsApp message to a saved contact',parameters:{type:'object',properties:{name:{type:'string',description:'Contact name'},message:{type:'string',description:'Message text, in the language the user speaks'}},required:['name','message']}}
+]}];
+function mkAction(c){
+  const a=c.args||{};const f=findC(a.name);
+  if(!f)return {say:'"'+(a.name||'?')+'" contacts me nahi mila. Upar 👥 button se jodo.'};
+  const d=digits(f.number);
+  if(d.length<8)return {say:f.name+' ka number sahi nahi lag raha. 👥 me check karo.'};
+  const el=document.createElement('a');el.className='act';
+  if(c.name==='call_contact'){
+    el.href='tel:+'+d;el.textContent='📞 '+f.name+' ko call karo';
+    return {say:f.name+' ko call karne ke liye neeche button dabao.',el};
+  }
+  if(c.name==='whatsapp_contact'){
+    const m=a.message||'';
+    el.href='https://wa.me/'+d+'?text='+encodeURIComponent(m);el.target='_blank';el.rel='noopener';
+    el.textContent='💬 '+f.name+' ko WhatsApp bhejo';
+    return {say:f.name+' ko message: '+m+'. Bhejne ke liye neeche button dabao.',el};
+  }
+  return {say:'Ye kaam abhi nahi aata.'};
+}
+function renderC(){
+  const box=$('cl');box.textContent='';
+  const c=loadC();
+  if(!c.length){box.textContent='Abhi koi contact nahi.';return}
+  c.forEach((x,i)=>{
+    const r=document.createElement('div');r.className='cr';
+    const t=document.createElement('span');t.textContent=x.name+'  '+x.number;
+    const b=document.createElement('button');b.textContent='🗑';
+    b.onclick=()=>{const l=loadC();l.splice(i,1);saveC(l);renderC()};
+    r.append(t,b);box.appendChild(r);
+  });
+}
+$('cb').onclick=()=>{renderC();$('cp').hidden=false};
+$('cx').onclick=()=>{$('cp').hidden=true};
+$('ca').onclick=()=>{
+  const n=$('cn').value.trim(),t=$('cnum').value.trim();
+  if(!n||digits(t).length<8){alert('Naam aur sahi number daalo.');return}
+  const c=loadC();c.push({name:n,number:t});saveC(c);
+  $('cn').value='';$('cnum').value='';renderC();
+};
+$('ci').onclick=async()=>{
+  if(!('contacts' in navigator)||!('ContactsManager' in window)){alert('Is browser me phone se import nahi hota. Naam aur number neeche khud daalo.');return}
+  try{
+    const r=await navigator.contacts.select(['name','tel'],{multiple:true});
+    const c=loadC();
+    r.forEach(p=>{const n=(p.name&&p.name[0])||'',t=(p.tel&&p.tel[0])||'';if(n&&t&&!c.some(x=>x.name===n))c.push({name:n,number:t})});
+    saveC(c);renderC();
+  }catch(e){}
+};
 $('kb').onclick=setKey;
 $('vt').onclick=()=>{voice=!voice;$('vt').textContent='Voice: '+(voice?'ON':'OFF');if(!voice)speechSynthesis.cancel()};
 
@@ -100,9 +190,15 @@ async function ask(q){
   const wait=add('Soch raha hoon...','b');
   try{
     const j=await generate();
-    const a=(j.candidates&&j.candidates[0].content.parts.map(p=>p.text).join(''))||'Jawab nahi mila.';
+    const parts=(j.candidates&&j.candidates[0]&&j.candidates[0].content&&j.candidates[0].content.parts)||[];
+    const acts=parts.filter(p=>p.functionCall).map(p=>mkAction(p.functionCall));
+    let a=parts.map(p=>p.text||'').join('').trim();
+    if(!a&&acts.length)a=acts.map(x=>x.say).join('\n');
+    if(!a)a='Jawab nahi mila.';
+    wait.textContent=a;
+    acts.forEach(x=>{if(x.el)wait.appendChild(x.el)});
     hist.push({role:'model',parts:[{text:a}]});
-    wait.textContent=a;speak(a);
+    speak(a);
   }catch(e){
     hist.pop();
     wait.textContent=navigator.onLine?'Problem: '+e.message:'Internet nahi hai.';
@@ -123,6 +219,7 @@ $('mic').onclick=()=>{
   r.onend=()=>$('mic').classList.remove('on');
   r.start();
 };
+if('serviceWorker' in navigator){navigator.serviceWorker.register('sw.js').catch(()=>{})}
 add('Namaste! Main Jarvis hoon. Kuch bhi poocho ya mic dabake bolo.','b');
 </script>
 </body>
